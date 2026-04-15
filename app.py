@@ -2,9 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# ---------------------------------------------------------------------------
-# Page config — harus dipanggil pertama sebelum apapun
-# ---------------------------------------------------------------------------
 st.set_page_config(
     page_title="SentimenTA",
     page_icon="🔍",
@@ -15,264 +12,212 @@ st.set_page_config(
 # ---------------------------------------------------------------------------
 # Session state defaults
 # ---------------------------------------------------------------------------
-if "df_latih" not in st.session_state:
-    st.session_state.df_latih = []
-if "df_uji" not in st.session_state:
-    st.session_state.df_uji = []
-if "hasil" not in st.session_state:
-    st.session_state.hasil = None
+defaults = {
+    "df_dataset":    None,   # DataFrame dataset lengkap (dari upload xlsx)
+    "preprocessor":  None,   # dict {tfidf_vectorizers, scaler, text_columns, likert_columns}
+    "all_models":    None,   # dict {label: {svm, lr, label_encoder, classes, accuracy}}
+    "hasil_eval":    None,   # hasil evaluasi per label
+}
+for k, v in defaults.items():
+    if k not in st.session_state:
+        st.session_state[k] = v
 
 # ---------------------------------------------------------------------------
-# Custom CSS
+# CSS
 # ---------------------------------------------------------------------------
-st.markdown(
-    """
-    <style>
-    /* Sidebar styling */
-    section[data-testid="stSidebar"] {
-        background-color: #1E3A5F;
-    }
-    section[data-testid="stSidebar"] * {
-        color: #E2E8F0 !important;
-    }
-    section[data-testid="stSidebar"] .stRadio label {
-        color: #CBD5E1 !important;
-    }
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
 
-    /* Card containers */
-    .summary-card {
-        background: linear-gradient(135deg, #2563EB 0%, #1D4ED8 100%);
-        border-radius: 12px;
-        padding: 24px 20px;
-        color: white;
-        text-align: center;
-        margin-bottom: 8px;
-    }
-    .summary-card .value {
-        font-size: 2.4rem;
-        font-weight: 700;
-        line-height: 1.1;
-    }
-    .summary-card .label {
-        font-size: 0.88rem;
-        opacity: 0.85;
-        margin-top: 4px;
-    }
+html, body, [class*="css"] { font-family: 'Plus Jakarta Sans', sans-serif; }
 
-    .card-green  { background: linear-gradient(135deg, #059669, #047857) !important; }
-    .card-orange { background: linear-gradient(135deg, #D97706, #B45309) !important; }
-    .card-purple { background: linear-gradient(135deg, #7C3AED, #6D28D9) !important; }
+section[data-testid="stSidebar"] { background-color: #0F1B2D; }
+section[data-testid="stSidebar"] * { color: #94A3B8 !important; }
+section[data-testid="stSidebar"] .stRadio label { color: #CBD5E1 !important; }
 
-    /* Step cards */
-    .step-card {
-        background: #F8FAFC;
-        border: 1px solid #E2E8F0;
-        border-left: 4px solid #2563EB;
-        border-radius: 8px;
-        padding: 18px 16px;
-        height: 100%;
-    }
-    .step-card h4 { margin: 0 0 8px 0; color: #1E293B; }
-    .step-card p  { margin: 0; color: #64748B; font-size: 0.9rem; line-height: 1.5; }
+.hero-title {
+    font-size: 2.8rem; font-weight: 800; color: #0F1B2D; line-height: 1.15;
+    letter-spacing: -0.03em;
+}
+.hero-sub {
+    color: #64748B; font-size: 1.05rem; margin-top: 6px; line-height: 1.6;
+}
+.accent { color: #2563EB; }
 
-    /* Page title */
-    .page-title {
-        font-size: 2rem;
-        font-weight: 700;
-        color: #1E293B;
-    }
-    .page-subtitle {
-        color: #64748B;
-        font-size: 1rem;
-        margin-top: -8px;
-    }
+.kpi-card {
+    background: #fff; border: 1px solid #E2E8F0; border-radius: 14px;
+    padding: 22px 20px; text-align: center; transition: box-shadow .2s;
+}
+.kpi-card:hover { box-shadow: 0 4px 20px rgba(37,99,235,.10); }
+.kpi-card .kpi-val {
+    font-size: 2.2rem; font-weight: 800; color: #0F1B2D; font-family: 'JetBrains Mono', monospace;
+}
+.kpi-card .kpi-lbl { font-size: 0.82rem; color: #94A3B8; margin-top: 4px; font-weight: 500; }
+.kpi-card.blue  .kpi-val { color: #2563EB; }
+.kpi-card.green .kpi-val { color: #059669; }
+.kpi-card.orange .kpi-val { color: #D97706; }
+.kpi-card.purple .kpi-val { color: #7C3AED; }
 
-    /* Badge */
-    .badge {
-        display: inline-block;
-        padding: 3px 10px;
-        border-radius: 20px;
-        font-size: 0.78rem;
-        font-weight: 600;
-    }
-    .badge-ok  { background:#D1FAE5; color:#065F46; }
-    .badge-warn { background:#FEF3C7; color:#92400E; }
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
+.step-wrap {
+    background: #F8FAFC; border: 1px solid #E2E8F0; border-left: 4px solid #2563EB;
+    border-radius: 10px; padding: 18px 16px; height: 100%;
+}
+.step-wrap h4 { margin: 0 0 8px 0; color: #1E293B; font-size: 0.95rem; }
+.step-wrap p  { margin: 0; color: #64748B; font-size: 0.85rem; line-height: 1.6; }
+
+.label-chip {
+    display: inline-block; padding: 3px 10px; border-radius: 20px;
+    font-size: 0.75rem; font-weight: 600; margin: 2px;
+    background: #EFF6FF; color: #1D4ED8;
+}
+.chip-green { background: #D1FAE5; color: #065F46; }
+.chip-yellow { background: #FEF3C7; color: #92400E; }
+</style>
+""", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
 # Header
 # ---------------------------------------------------------------------------
-st.markdown('<p class="page-title">🔍 SentimenTA</p>', unsafe_allow_html=True)
-st.markdown(
-    '<p class="page-subtitle">Analisis Sentimen Pengguna terhadap Aplikasi Pendeteksi '
-    "Lowongan Kerja Palsu &nbsp;|&nbsp; SVM vs Regresi Logistik</p>",
-    unsafe_allow_html=True,
-)
+col_logo, col_title = st.columns([1, 8])
+with col_title:
+    st.markdown(
+        '<p class="hero-title">🔍 <span class="accent">SentimenTA</span></p>',
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<p class="hero-sub">Analisis sentimen multi-label pengguna terhadap '
+        '<b>Aplikasi Pendeteksi Lowongan Kerja Palsu</b> — SVM vs Regresi Logistik</p>',
+        unsafe_allow_html=True,
+    )
 st.divider()
 
 # ---------------------------------------------------------------------------
-# Summary metrics
+# KPI Cards
 # ---------------------------------------------------------------------------
-n_latih   = len(st.session_state.df_latih)
-n_uji     = len(st.session_state.df_uji)
-has_hasil = st.session_state.hasil is not None
+ds     = st.session_state.df_dataset
+models = st.session_state.all_models
+hasil  = st.session_state.hasil_eval
 
-if has_hasil:
-    svm = st.session_state.hasil["svm"]
-    lr  = st.session_state.hasil["lr"]
-    best     = svm if svm["accuracy"] >= lr["accuracy"] else lr
-    best_acc = f"{best['accuracy']:.2%}"
-    best_nm  = "SVM" if svm["accuracy"] >= lr["accuracy"] else "LR"
+n_responden = len(ds) if ds is not None else 0
+n_labels    = len(models) if models else 0
+n_labels_done = len(hasil) if hasil else 0
+
+if hasil:
+    avg_svm = sum(h["svm_acc"] for h in hasil.values()) / len(hasil)
+    avg_lr  = sum(h["lr_acc"]  for h in hasil.values()) / len(hasil)
+    best_acc_str = f"{max(avg_svm, avg_lr):.1%}"
+    best_model   = "SVM" if avg_svm >= avg_lr else "LR"
 else:
-    best_acc = "—"
-    best_nm  = "—"
+    best_acc_str = "—"
+    best_model   = "—"
 
 c1, c2, c3, c4 = st.columns(4)
-with c1:
-    st.markdown(
-        f'<div class="summary-card">'
-        f'  <div class="value">{n_latih}</div>'
-        f'  <div class="label">📝 Data Latih</div>'
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-with c2:
-    st.markdown(
-        f'<div class="summary-card card-green">'
-        f'  <div class="value">{n_uji}</div>'
-        f'  <div class="label">🧪 Data Uji</div>'
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-with c3:
-    st.markdown(
-        f'<div class="summary-card card-orange">'
-        f'  <div class="value">{best_nm}</div>'
-        f'  <div class="label">🏆 Model Terbaik</div>'
-        f"</div>",
-        unsafe_allow_html=True,
-    )
-with c4:
-    st.markdown(
-        f'<div class="summary-card card-purple">'
-        f'  <div class="value">{best_acc}</div>'
-        f'  <div class="label">🎯 Akurasi Tertinggi</div>'
-        f"</div>",
-        unsafe_allow_html=True,
-    )
+cards = [
+    (c1, "blue",   str(n_responden),    "📋 Responden Dataset"),
+    (c2, "green",  str(n_labels),       "🏷️ Label Dilatih"),
+    (c3, "orange", best_model,          "🏆 Model Terbaik"),
+    (c4, "purple", best_acc_str,        "🎯 Akurasi Rata-rata"),
+]
+for col, cls, val, lbl in cards:
+    with col:
+        st.markdown(
+            f'<div class="kpi-card {cls}">'
+            f'  <div class="kpi-val">{val}</div>'
+            f'  <div class="kpi-lbl">{lbl}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
 
 st.markdown("<br>", unsafe_allow_html=True)
 
 # ---------------------------------------------------------------------------
-# Workflow guide
+# Panduan penggunaan
 # ---------------------------------------------------------------------------
 st.subheader("📋 Panduan Penggunaan")
-s1, s2, s3 = st.columns(3)
-
-with s1:
-    st.markdown(
-        """<div class="step-card">
-        <h4>① Input Data Latih</h4>
-        <p>Upload file CSV atau tambahkan data secara manual.
-        Setiap data harus memiliki teks umpan balik dan label sentimen
-        (Positif, Negatif, atau Netral).</p>
-        </div>""",
-        unsafe_allow_html=True,
-    )
-with s2:
-    st.markdown(
-        """<div class="step-card">
-        <h4>② Input Data Uji</h4>
-        <p>Upload atau masukkan data uji beserta label yang benar.
-        Data ini digunakan untuk mengukur performa model setelah
-        proses pelatihan selesai.</p>
-        </div>""",
-        unsafe_allow_html=True,
-    )
-with s3:
-    st.markdown(
-        """<div class="step-card">
-        <h4>③ Lihat Hasil Evaluasi</h4>
-        <p>Latih kedua model (SVM & Regresi Logistik) dan bandingkan
-        performa melalui Accuracy, Precision, Recall, F1-Score,
-        serta Confusion Matrix interaktif.</p>
-        </div>""",
-        unsafe_allow_html=True,
-    )
+s1, s2, s3, s4 = st.columns(4)
+steps = [
+    ("① Upload Dataset", "Upload file <code>dataset_preprocessed.xlsx</code> di halaman <b>Dataset</b>. File harus memiliki kolom teks, Likert, dan label sentimen."),
+    ("② Upload Model", "Upload <code>preprocessor.pkl</code> dan <code>models_all_labels.pkl</code> di halaman <b>Model</b> (hasil dari training script)."),
+    ("③ Lihat Hasil", "Halaman <b>Hasil</b> menampilkan perbandingan akurasi SVM vs LR untuk setiap label sentimen."),
+    ("④ Prediksi Baru", "Masukkan respons baru di halaman <b>Prediksi</b> untuk mendapatkan prediksi sentimen dari model."),
+]
+for col, (title, desc) in zip([s1, s2, s3, s4], steps):
+    with col:
+        st.markdown(
+            f'<div class="step-wrap"><h4>{title}</h4><p>{desc}</p></div>',
+            unsafe_allow_html=True,
+        )
 
 # ---------------------------------------------------------------------------
-# Label distribution chart (tampil kalau data latih sudah ada)
+# Label info
 # ---------------------------------------------------------------------------
-if n_latih > 0:
+st.divider()
+st.subheader("🏷️ Label Sentimen yang Dianalisis")
+st.caption("Setiap aspek aplikasi dianalisis secara terpisah dengan model SVM & Regresi Logistik.")
+
+label_meta = {
+    "label_kemudahan_deteksi":   "Kemudahan Deteksi",
+    "label_akurasi_deteksi":     "Akurasi Deteksi",
+    "label_fitur_deteksi":       "Fitur Deteksi",
+    "label_penjelasan_deteksi":  "Penjelasan Deteksi",
+    "label_manfaat_cv":          "Manfaat Pembuat CV",
+    "label_fitur_cv":            "Fitur Pembuat CV",
+    "label_informatif_edukasi":  "Informatif Edukasi",
+    "label_konten_edukasi":      "Konten Edukasi",
+    "label_kepuasan_keseluruhan":"Kepuasan Keseluruhan",
+    "label_kelebihan_aplikasi":  "Kelebihan Aplikasi",
+    "label_kekurangan_aplikasi": "Kekurangan Aplikasi",
+    "label_saran_kritik":        "Saran & Kritik",
+}
+
+chips_html = ""
+for key, display in label_meta.items():
+    # check if trained
+    if models and key in models:
+        acc = models[key]["accuracy"]
+        best = max(acc["svm"], acc["lr"])
+        extra = f' <span style="font-size:.7rem;color:#94A3B8">({best:.0%})</span>'
+        cls = "chip-green"
+    else:
+        extra = ""
+        cls = ""
+    chips_html += f'<span class="label-chip {cls}">{display}{extra}</span>'
+
+st.markdown(chips_html, unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# Dataset preview kalau sudah ada
+# ---------------------------------------------------------------------------
+if ds is not None:
     st.divider()
-    st.subheader("📊 Distribusi Label Data Latih")
+    st.subheader("📊 Distribusi Dataset")
 
-    df = pd.DataFrame(st.session_state.df_latih)
-    label_counts = df["label"].value_counts().reset_index()
-    label_counts.columns = ["Label", "Jumlah"]
+    label_cols_present = [c for c in label_meta.keys() if c in ds.columns]
+    if label_cols_present:
+        # Hitung distribusi sentimen per label
+        dist_rows = []
+        for col in label_cols_present:
+            vc = ds[col].value_counts()
+            for sentiment, count in vc.items():
+                dist_rows.append({
+                    "Label": label_meta.get(col, col),
+                    "Sentimen": str(sentiment).capitalize(),
+                    "Jumlah": count,
+                })
+        df_dist = pd.DataFrame(dist_rows)
 
-    color_map = {"Positif": "#059669", "Negatif": "#DC2626", "Netral": "#D97706"}
-
-    col_chart, col_table = st.columns([1, 1])
-    with col_chart:
-        fig = px.pie(
-            label_counts,
-            values="Jumlah",
-            names="Label",
-            color="Label",
-            color_discrete_map=color_map,
-            hole=0.45,
+        color_map = {"Positif": "#059669", "Negatif": "#DC2626", "Netral": "#D97706"}
+        fig = px.bar(
+            df_dist, x="Label", y="Jumlah", color="Sentimen",
+            barmode="stack", color_discrete_map=color_map,
+            height=380,
         )
         fig.update_layout(
-            height=280,
-            margin=dict(t=10, b=10, l=10, r=10),
-            legend=dict(orientation="h", y=-0.15),
+            plot_bgcolor="white", paper_bgcolor="white",
+            margin=dict(t=20, b=60),
+            xaxis=dict(tickangle=-30),
+            legend=dict(orientation="h", y=1.05),
         )
-        fig.update_traces(textposition="inside", textinfo="percent+label")
         st.plotly_chart(fig, use_container_width=True)
-
-    with col_table:
-        st.markdown("**Rincian per label:**")
-        total = label_counts["Jumlah"].sum()
-        for _, row in label_counts.iterrows():
-            pct = row["Jumlah"] / total * 100
-            badge_cls = (
-                "badge-ok" if row["Label"] == "Positif"
-                else "badge-warn" if row["Label"] == "Netral"
-                else "badge"
-            )
-            st.markdown(
-                f'<div style="display:flex;justify-content:space-between;'
-                f'align-items:center;padding:10px 0;border-bottom:1px solid #E2E8F0">'
-                f'  <span style="font-weight:500">{row["Label"]}</span>'
-                f'  <span><b>{row["Jumlah"]}</b> data &nbsp;'
-                f'  <span style="color:#94A3B8;font-size:0.85rem">({pct:.1f}%)</span></span>'
-                f"</div>",
-                unsafe_allow_html=True,
-            )
-
-# ---------------------------------------------------------------------------
-# Quick results preview (kalau model sudah dilatih)
-# ---------------------------------------------------------------------------
-if has_hasil:
-    st.divider()
-    st.subheader("📈 Ringkasan Hasil Terakhir")
-
-    metrics = ["accuracy", "precision", "recall", "f1"]
-    labels_display = ["Accuracy", "Precision", "Recall", "F1-Score"]
-
-    rows = []
-    for key, res in [("SVM", svm), ("Regresi Logistik", lr)]:
-        rows.append({
-            "Model": key,
-            **{lbl: f"{res[m]:.4f}" for m, lbl in zip(metrics, labels_display)},
-        })
-
-    st.dataframe(
-        pd.DataFrame(rows).set_index("Model"),
-        use_container_width=True,
-    )
-    st.caption("Buka halaman **Hasil** untuk melihat Confusion Matrix dan analisis lengkap.")
+    else:
+        st.info("Kolom label tidak ditemukan di dataset. Pastikan nama kolom sesuai.")
